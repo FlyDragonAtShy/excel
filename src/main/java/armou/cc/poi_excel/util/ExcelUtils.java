@@ -1,5 +1,18 @@
 package armou.cc.poi_excel.util;
 
+import armou.cc.poi_excel.annotation.ExcelColumn;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.BooleanUtils;
+import org.apache.commons.lang3.CharUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -7,35 +20,9 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.lang3.BooleanUtils;
-import org.apache.commons.lang3.CharUtils;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.math.NumberUtils;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.CellStyle;
-import org.apache.poi.ss.usermodel.DateUtil;
-import org.apache.poi.ss.usermodel.Font;
-import org.apache.poi.ss.usermodel.IndexedColors;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import armou.cc.poi_excel.annotation.ExcelColumn;
 
 
 public class ExcelUtils {
@@ -212,7 +199,7 @@ public class ExcelUtils {
 
     }
 
-    public static <T> void writeExcel(String path, List<T> dataList, Class<T> cls) {
+    public static <T> void writeExcel(String path, List<T> dataList, Class<T> cls, final String sheetName, final Integer[] mergeBasis, final Integer[] mergeCells) {
         Field[] fields = cls.getDeclaredFields();
         List<Field> fieldList = Arrays.stream(fields).filter(field->{
             ExcelColumn annotation = field.getAnnotation(ExcelColumn.class);
@@ -234,8 +221,7 @@ public class ExcelUtils {
 
         @SuppressWarnings("resource")
 		Workbook wb = new XSSFWorkbook();
-        Sheet sheet = wb.createSheet("demo sheet");
-
+        Sheet sheet = wb.createSheet(sheetName);
         AtomicInteger ai = new AtomicInteger();
 
         {
@@ -252,10 +238,10 @@ public class ExcelUtils {
                 Cell cell = row.createCell(aj.getAndIncrement());
 
                 CellStyle cellStyle = wb.createCellStyle();
-                cellStyle.setFillForegroundColor(IndexedColors.GREEN.getIndex());
+                cellStyle.setFillForegroundColor(IndexedColors.LIGHT_BLUE.getIndex());
                 cellStyle.setFillPattern(CellStyle.SOLID_FOREGROUND);
                 cellStyle.setAlignment(CellStyle.ALIGN_CENTER);
-
+                cellStyle.setWrapText(true);
                 Font font = wb.createFont();
                 font.setBoldweight(Font.BOLDWEIGHT_BOLD);
                 cellStyle.setFont(font);
@@ -294,8 +280,13 @@ public class ExcelUtils {
 
         }
 
+        //合并单元格
+        if(mergeBasis != null && mergeBasis.length > 0 && mergeCells != null && mergeCells.length > 0){
+            mergedRegion(sheet,mergeCells,1,sheet.getLastRowNum(),mergeBasis);
+        }
+
         //冻结窗格
-        wb.getSheet("demo sheet").createFreezePane(0,1,0,1);
+        wb.getSheet(sheetName).createFreezePane(0,1,0,1);
 
         File file = new File(path);
         if(file.exists()){
@@ -305,6 +296,42 @@ public class ExcelUtils {
             wb.write(new FileOutputStream(file));
         }catch (Exception e){
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * 合并单元格
+     * @param sheet 工作表
+     * @param mergeCells 单元格
+     * @param startRow 开始行
+     * @param endRow 结束行
+     * @param mergeBasis 基准列
+     */
+    private static void mergedRegion(Sheet sheet, Integer[] mergeCells,int startRow, int endRow,Integer[] mergeBasis) {
+        Row start = sheet.getRow(startRow);
+        String sWill = Arrays.stream(mergeBasis).map(ci-> start.getCell(ci).getStringCellValue()).collect(Collectors.joining());
+        int count = 0;
+        for (int i = startRow+1; i <= endRow; i++) {
+            Row row = sheet.getRow(i);
+            String sCurrent =Arrays.stream(mergeBasis).map(ci-> row.getCell(ci).getStringCellValue()).collect(Collectors.joining());
+            if(sWill.equals(sCurrent)){
+                count++;
+                //末行自动合并
+                if(i == endRow){
+                    for(Integer index: mergeCells){
+                        sheet.addMergedRegion(new CellRangeAddress( startRow, startRow+count,index , index));
+                    }
+                }
+            }else{
+                if(count>0){
+                    for(Integer index: mergeCells){
+                        sheet.addMergedRegion(new CellRangeAddress( startRow, startRow+count,index , index));
+                    }
+                }
+                startRow = i;
+                sWill = sCurrent;
+                count = 0;
+            }
         }
     }
 
